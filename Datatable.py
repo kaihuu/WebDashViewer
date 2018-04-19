@@ -8,6 +8,33 @@ import json
 import pandas as pd
 import numpy as np
 import plotly
+import DBAccessor as dbac
+import plotly.graph_objs as go
+
+query = """WITH TRIP AS(
+	SELECT TRIPS_Doppler.TRIP_ID AS TRIP_ID_Doppler, TRIPS_LINKS_LOOKUP2.TRIP_ID AS TRIP_ID_Normal
+	FROM TRIPS_Doppler,TRIPS_LINKS_LOOKUP2
+	WHERE TRIPS_Doppler.SENSOR_ID = TRIPS_LINKS_LOOKUP2.SENSOR_ID
+	AND TRIPS_Doppler.START_TIME = TRIPS_LINKS_LOOKUP2.START_TIME
+	AND TRIPS_Doppler.END_TIME = TRIPS_LINKS_LOOKUP2.END_TIME)
+,Doppler AS(
+	SELECT TRIP.TRIP_ID_Doppler, COUNT(*) as DopplerCount
+	FROM TRIP, ECOLOG_Doppler
+	WHERE TRIP.TRIP_ID_Doppler = ECOLOG_Doppler.TRIP_ID
+	GROUP BY TRIP.TRIP_ID_Doppler)
+,Normal as(
+	SELECT TRIP.TRIP_ID_Normal, COUNT(*) as NormalCount
+	FROM TRIP, ECOLOG_LINKS_LOOKUP2
+	WHERE TRIP.TRIP_ID_Normal = ECOLOG_LINKS_LOOKUP2.TRIP_ID
+	GROUP BY TRIP.TRIP_ID_Normal)
+
+SELECT TRIP.TRIP_ID_Doppler, TRIP.TRIP_ID_Normal, DopplerCount, NormalCount
+FROM TRIP,Doppler,Normal
+WHERE TRIP.TRIP_ID_Doppler = Doppler.TRIP_ID_Doppler
+AND TRIP.TRIP_ID_Normal = Normal.TRIP_ID_Normal
+"""
+
+df = dbac.DBAccessor.ExecuteQueryDF(query)
 
 app = dash.Dash(__name__)
 server = app.server
@@ -23,106 +50,94 @@ app.css.append_css({
 
 F_WALMART = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/1962_2006_walmart_store_openings.csv')
 
-DF_GAPMINDER = pd.read_csv(
-    'https://raw.githubusercontent.com/plotly/datasets/master/gapminderDataFiveYear.csv'
-)
-DF_GAPMINDER = DF_GAPMINDER[DF_GAPMINDER['year'] == 2007]
-DF_GAPMINDER.loc[0:20]
+#DF_GAPMINDER = pd.read_csv(
+#    'https://raw.githubusercontent.com/plotly/datasets/master/gapminderDataFiveYear.csv'
+#)
+DF_GAPMINDER = df
 
-DF_SIMPLE = pd.DataFrame({
-    'x': ['A', 'B', 'C', 'D', 'E', 'F'],
-    'y': [4, 3, 1, 2, 3, 6],
-    'z': ['a', 'b', 'c', 'a', 'b', 'c']
-})
-
-ROWS = [
-    {'a': 'AA', 'b': 1},
-    {'a': 'AB', 'b': 2},
-    {'a': 'BB', 'b': 3},
-    {'a': 'BC', 'b': 4},
-    {'a': 'CC', 'b': 5},
-    {'a': 'CD', 'b': 6}
-]
-
+available_indicators = df.columns
 
 app.layout = html.Div([
-    html.H4('Gapminder DataTable'),
-    dt.DataTable(
-        rows=DF_GAPMINDER.to_dict('records'),
+    html.Div([
 
-        # optional - sets the order of columns
-        columns=sorted(DF_GAPMINDER.columns),
+        html.Div([
+            dcc.Dropdown(
+                id='crossfilter-xaxis-column',
+                options=[{'label': i, 'value': i} for i in available_indicators],
+                value='DopplerCount'
+            ),
+            dcc.RadioItems(
+                id='crossfilter-xaxis-type',
+                options=[{'label': i, 'value': i} for i in ['Linear', 'Log']],
+                value='Linear',
+                labelStyle={'display': 'inline-block'}
+            )
+        ],
+        style={'width': '49%', 'display': 'inline-block'}),
 
-        row_selectable=True,
-        filterable=True,
-        sortable=True,
-        selected_row_indices=[],
-        id='datatable-gapminder'
-    ),
-    html.Div(id='selected-indexes'),
-    dcc.Graph(
-        id='graph-gapminder'
-    ),
-], className="container")
+        html.Div([
+            dcc.Dropdown(
+                id='crossfilter-yaxis-column',
+                options=[{'label': i, 'value': i} for i in available_indicators],
+                value='NormalCount'
+            ),
+            dcc.RadioItems(
+                id='crossfilter-yaxis-type',
+                options=[{'label': i, 'value': i} for i in ['Linear', 'Log']],
+                value='Linear',
+                labelStyle={'display': 'inline-block'}
+            )
+        ], style={'width': '49%', 'float': 'right', 'display': 'inline-block'})
+    ], style={
+        'borderBottom': 'thin lightgrey solid',
+        'backgroundColor': 'rgb(250, 250, 250)',
+        'padding': '10px 5px'
+    }),
+    html.Div([
+        dcc.Graph(
+            id='crossfilter-indicator-scatter',
+            #hoverData={'points': [{'customdata': 'Japan'}]}
+        )
+    ], style={'width': '49%', 'display': 'inline-block', 'padding': '0 20'}),
 
+])
 
 @app.callback(
-    Output('datatable-gapminder', 'selected_row_indices'),
-    [Input('graph-gapminder', 'clickData')],
-    [State('datatable-gapminder', 'selected_row_indices')])
-def update_selected_row_indices(clickData, selected_row_indices):
-    if clickData:
-        for point in clickData['points']:
-            if point['pointNumber'] in selected_row_indices:
-                selected_row_indices.remove(point['pointNumber'])
-            else:
-                selected_row_indices.append(point['pointNumber'])
-    return selected_row_indices
+    dash.dependencies.Output('crossfilter-indicator-scatter', 'figure'),
+    [dash.dependencies.Input('crossfilter-xaxis-column', 'value'),
+     dash.dependencies.Input('crossfilter-yaxis-column', 'value'),
+     dash.dependencies.Input('crossfilter-xaxis-type', 'value'),
+     dash.dependencies.Input('crossfilter-yaxis-type', 'value')])
+def update_graph(xaxis_column_name, yaxis_column_name,
+                 xaxis_type, yaxis_type):
 
-
-@app.callback(
-    Output('graph-gapminder', 'figure'),
-    [Input('datatable-gapminder', 'rows'),
-     Input('datatable-gapminder', 'selected_row_indices')])
-def update_figure(rows, selected_row_indices):
-    dff = pd.DataFrame(rows)
-    fig = plotly.tools.make_subplots(
-        rows=3, cols=1,
-        subplot_titles=('Life Expectancy', 'GDP Per Capita', 'Population',),
-        shared_xaxes=True)
-    marker = {'color': ['#0074D9']*len(dff)}
-    for i in (selected_row_indices or []):
-        marker['color'][i] = '#FF851B'
-    fig.append_trace({
-        'x': dff['country'],
-        'y': dff['lifeExp'],
-        'type': 'bar',
-        'marker': marker
-    }, 1, 1)
-    fig.append_trace({
-        'x': dff['country'],
-        'y': dff['gdpPercap'],
-        'type': 'bar',
-        'marker': marker
-    }, 2, 1)
-    fig.append_trace({
-        'x': dff['country'],
-        'y': dff['pop'],
-        'type': 'bar',
-        'marker': marker
-    }, 3, 1)
-    fig['layout']['showlegend'] = False
-    fig['layout']['height'] = 800
-    fig['layout']['margin'] = {
-        'l': 40,
-        'r': 10,
-        't': 60,
-        'b': 200
+    return {
+        'data': [go.Scatter(
+            x=df[xaxis_column_name],
+            y=df[yaxis_column_name],
+            text=df['TRIP_ID_Normal'],
+            customdata=df['TRIP_ID_Normal'],
+            mode='markers',
+            marker={
+                'size': 15,
+                'opacity': 0.5,
+                'line': {'width': 0.5, 'color': 'white'}
+            }
+        )],
+        'layout': go.Layout(
+            xaxis={
+                'title': xaxis_column_name,
+                'type': 'linear' if xaxis_type == 'Linear' else 'log'
+            },
+            yaxis={
+                'title': yaxis_column_name,
+                'type': 'linear' if yaxis_type == 'Linear' else 'log'
+            },
+            margin={'l': 50, 'b': 30, 't': 10, 'r': 0},
+            height=450,
+            hovermode='closest'
+        )
     }
-    fig['layout']['yaxis3']['type'] = 'log'
-    return fig
-
-
 
 
 if __name__ == '__main__':
