@@ -1,4 +1,5 @@
 import pyodbc
+import pandas.io.sql as psql
 
 class DBAccessor:
     """DB Access"""
@@ -14,3 +15,9 @@ class DBAccessor:
         cur.close()
         cnn.close()
         return rows
+
+    @classmethod
+    def ExecuteQueryDF(self, query):
+        with pyodbc.connect(self.config) as conn:
+            df = psql.read_sql(query, conn)
+        return df
