@@ -48,8 +48,6 @@ app.css.append_css({
 })
 
 
-F_WALMART = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/1962_2006_walmart_store_openings.csv')
-
 #DF_GAPMINDER = pd.read_csv(
 #    'https://raw.githubusercontent.com/plotly/datasets/master/gapminderDataFiveYear.csv'
 #)
